@@ -1,22 +1,23 @@
 from flask import Flask, request
 import os
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
 
-# Carga variables de entorno
+# Cargar variables de entorno
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Crear cliente OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 
-# Ruta de prueba simple
+# Ruta de prueba
 @app.route('/')
 def home():
     return "✅ Bot de WhatsApp con Flask y OpenAI está activo."
 
-# Ruta para manejar mensajes de Twilio WhatsApp
+# Ruta webhook de WhatsApp
 @app.route('/whatsapp', methods=['POST'])
 def whatsapp_bot():
     incoming_msg = request.form.get('Body', '').strip().lower()
@@ -26,11 +27,11 @@ def whatsapp_bot():
     <Message>{response_msg}</Message>
 </Response>"""
 
-# Función que genera una respuesta con IA según el mensaje recibido
+# Generar respuesta con IA
 def generar_respuesta(mensaje):
     try:
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # o "gpt-4" si tienes acceso
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # o usa "gpt-4" si tienes acceso
             messages=[
                 {"role": "system", "content": "Eres un asesor de trading experto en opciones sobre IBIT."},
                 {"role": "user", "content": mensaje}
