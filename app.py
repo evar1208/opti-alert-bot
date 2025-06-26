@@ -1,15 +1,13 @@
 from flask import Flask, request
 import os
 from dotenv import load_dotenv
-import openai
 from datetime import datetime, timedelta
 import yfinance as yf
+import openai  # ✅ import correcto
 
 # Cargar variables de entorno
 load_dotenv()
-
-# Crear cliente OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")  # ✅ sin client
 
 app = Flask(__name__)
 
@@ -110,7 +108,8 @@ def ejecutar_analisis_opciones(mensaje_usuario: str) -> str:
     except Exception as e:
         return f"❌ Error durante el análisis: {str(e)}"
 
-# Ejecutar localmente
+# Ejecutar localmente o en Render
 if __name__ == '__main__':
-   app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
 
