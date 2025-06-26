@@ -3,11 +3,13 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import yfinance as yf
-import openai  # ✅ import correcto
+from openai import OpenAI
 
 # Cargar variables de entorno
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")  # ✅ sin client
+
+# Crear cliente OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 
@@ -32,7 +34,7 @@ def generar_respuesta(mensaje):
         if "analizar" in mensaje.lower():
             return ejecutar_analisis_opciones(mensaje)
         else:
-            completion = openai.ChatCompletion.create(
+            completion = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "Eres un asesor de trading experto en opciones sobre IBIT."},
@@ -108,8 +110,9 @@ def ejecutar_analisis_opciones(mensaje_usuario: str) -> str:
     except Exception as e:
         return f"❌ Error durante el análisis: {str(e)}"
 
-# Ejecutar localmente o en Render
+# Ejecutar localmente
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+   app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
 
 
