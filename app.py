@@ -2,149 +2,148 @@ from flask import Flask, request
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-import numpy as np
 import yfinance as yf
 from openai import OpenAI
-from scipy.stats import norm
+import math
+
+# === Configuración ===
 
 # Cargar variables de entorno
 load_dotenv()
 
-# Inicializar OpenAI
+# Inicializar cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Inicializar app Flask
 app = Flask(__name__)
 
-# Diccionario para mantener el estado conversacional por número
-# En producción sería ideal usar base de datos o sesión persistente
-estado_usuario = {}
+# === Funciones auxiliares ===
 
-@app.route('/')
+def norm_cdf(x):
+    """
+    Función de distribución acumulada normal estándar
+    (sustituto de scipy.stats.norm.cdf)
+    """
+    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+def calcular_delta_call(S, K, T, r, sigma):
+    """
+    Calcula delta de una call europea usando Black-Scholes.
+    """
+    if T <= 0 or sigma <= 0:
+        return 0.0
+    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    return norm_cdf(d1)
+
+# === Lógica del bot ===
+
+# Estado conversacional
+conversacion = {}
+
+@app.route("/")
 def home():
     return "✅ Bot de WhatsApp con Flask y OpenAI está activo."
 
-@app.route('/whatsapp', methods=['POST'])
+@app.route("/whatsapp", methods=["POST"])
 def whatsapp_bot():
-    numero = request.form.get('From')
-    incoming_msg = request.form.get('Body', '').strip().lower()
+    incoming_msg = request.form.get("Body", "").strip().lower()
+    sender = request.form.get("From", "unknown")
 
-    # Reiniciar conversación si dice hola o start
+    # Verificar si el usuario tiene un flujo activo
+    estado = conversacion.get(sender, {})
+
     if incoming_msg in ["hola", "start"]:
-        estado_usuario[numero] = {}
-        return responder("👋 ¡Hola! ¿Qué tipo de opción quieres analizar? (call o put)")
+        conversacion[sender] = {}
+        return responder("👋 ¡Hola! Vamos a analizar una opción.\n¿Qué tipo de opción quieres analizar? (call o put)")
 
-    # Recuperar estado de la conversación
-    user_state = estado_usuario.get(numero, {})
-
-    # Flujo de preguntas
-    if 'tipo' not in user_state:
-        if incoming_msg in ['call', 'put']:
-            user_state['tipo'] = incoming_msg
-            estado_usuario[numero] = user_state
+    if "tipo" not in estado:
+        if incoming_msg in ["call", "put"]:
+            estado["tipo"] = incoming_msg
+            conversacion[sender] = estado
             return responder("¿Vas a COMPRAR o VENDER esta opción?")
         else:
-            return responder("Indica si deseas analizar una opción 'call' o 'put'.")
+            return responder("Por favor responde 'call' o 'put'.")
 
-    if 'operacion' not in user_state:
-        if incoming_msg in ['comprar', 'vender']:
-            user_state['operacion'] = incoming_msg
-            estado_usuario[numero] = user_state
+    if "operacion" not in estado:
+        if incoming_msg in ["comprar", "vender"]:
+            estado["operacion"] = incoming_msg
+            conversacion[sender] = estado
             return responder("¿Deseas solo opciones fuera del dinero (OTM)? (s/n)")
         else:
-            return responder("Indica si deseas COMPRAR o VENDER la opción.")
+            return responder("Responde 'comprar' o 'vender'.")
 
-    if 'otm' not in user_state:
-        if incoming_msg in ['s', 'n']:
-            user_state['otm'] = incoming_msg == 's'
-            estado_usuario[numero] = user_state
+    if "otm" not in estado:
+        if incoming_msg in ["s", "n"]:
+            estado["otm"] = incoming_msg == "s"
+            conversacion[sender] = estado
             return responder("¿Cuál es la prima objetivo? (por ejemplo, 0.6)")
         else:
-            return responder("Responde s o n para indicar si deseas solo opciones OTM.")
+            return responder("Responde 's' o 'n'.")
 
-    if 'prima' not in user_state:
+    if "prima" not in estado:
         try:
-            user_state['prima'] = float(incoming_msg)
-            estado_usuario[numero] = user_state
+            estado["prima"] = float(incoming_msg.replace("$","").strip())
+            conversacion[sender] = estado
             return responder("¿Cuál es el vencimiento deseado? (1 semana, 2 semanas, 1 mes, 2 meses)")
-        except ValueError:
-            return responder("Introduce un valor numérico para la prima objetivo.")
+        except:
+            return responder("Por favor indica un número para la prima.")
 
-    if 'vencimiento' not in user_state:
-        if incoming_msg in ['1 semana', '2 semanas', '1 mes', '2 meses']:
-            user_state['vencimiento'] = incoming_msg
-            estado_usuario[numero] = user_state
+    if "vencimiento" not in estado:
+        opciones = ["1 semana", "2 semanas", "1 mes", "2 meses"]
+        if incoming_msg in opciones:
+            estado["vencimiento"] = incoming_msg
+            conversacion[sender] = estado
             return responder("¿Cuántos contratos deseas analizar?")
         else:
             return responder("Indica el vencimiento: 1 semana, 2 semanas, 1 mes o 2 meses.")
 
-    if 'contratos' not in user_state:
+    if "contratos" not in estado:
         try:
-            user_state['contratos'] = int(incoming_msg)
-            estado_usuario[numero] = user_state
-            # Ejecutar análisis
-            opciones, mensaje = ejecutar_analisis_opciones(user_state)
-            if opciones:
-                user_state['opciones_encontradas'] = opciones
-                estado_usuario[numero] = user_state
-                return responder(
-                    mensaje +
-                    "\n\n➡️ Escribe el número de la opción que quieres analizar en detalle (1, 2 o 3), o 'reiniciar' para empezar de nuevo."
-                )
-            else:
-                return responder(mensaje + "\n\nEscribe 'hola' para reiniciar.")
-        except ValueError:
-            return responder("Introduce un número entero para los contratos.")
+            estado["contratos"] = int(incoming_msg)
+            conversacion[sender] = estado
+            return mostrar_opciones(sender)
+        except:
+            return responder("Indica la cantidad de contratos como un número entero.")
 
-    if 'opciones_encontradas' in user_state:
-        if incoming_msg in ['reiniciar', 'hola', 'start']:
-            estado_usuario[numero] = {}
-            return responder("🔄 Flujo reiniciado. ¿Qué tipo de opción quieres analizar? (call o put)")
+    # Si envía un índice de selección
+    if estado.get("opciones_mostradas") and incoming_msg.isdigit():
+        idx = int(incoming_msg)
+        opciones = estado["opciones_mostradas"]
+        if 0 <= idx < len(opciones):
+            opcion = opciones[idx]
+            return analizar_opcion(sender, opcion)
+        else:
+            return responder(f"Índice inválido. Ingresa un número entre 0 y {len(opciones)-1}.")
 
-        try:
-            idx = int(incoming_msg) - 1
-            opciones = user_state['opciones_encontradas']
-            if 0 <= idx < len(opciones):
-                detalle = generar_analisis_detallado(opciones[idx], user_state)
-                estado_usuario[numero] = {}  # Reiniciar estado tras análisis
-                return responder(detalle + "\n\n✅ Escribe 'hola' o 'start' para analizar otra operación.")
-            else:
-                return responder("⚠️ Índice fuera de rango. Elige entre 1, 2 o 3.")
-        except ValueError:
-            return responder("⚠️ Por favor, indica el número de la opción que deseas analizar (1, 2 o 3).")
+    return responder("No entendí. Escribe 'hola' para comenzar de nuevo.")
 
-    return responder("❌ Ha ocurrido un error inesperado. Escribe 'hola' para reiniciar.")
-
-def responder(texto):
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>{texto}</Message>
-</Response>"""
-
-def ejecutar_analisis_opciones(user_state):
-    tipo = user_state['tipo']
-    operacion = user_state['operacion']
-    otm = user_state['otm']
-    prima_obj = user_state['prima']
-    vencimiento = user_state['vencimiento']
-    contratos = user_state['contratos']
+def mostrar_opciones(sender):
+    """
+    Busca opciones y muestra las 3 más cercanas.
+    """
+    estado = conversacion[sender]
+    tipo = estado["tipo"]
+    operacion = estado["operacion"]
+    otm = estado["otm"]
+    prima_obj = estado["prima"]
+    vencimiento = estado["vencimiento"]
+    contratos = estado["contratos"]
 
     ticker = yf.Ticker("IBIT")
-
-    # Obtener fecha límite
     dias = {
-        '1 semana': 7,
-        '2 semanas': 14,
-        '1 mes': 30,
-        '2 meses': 60
+        "1 semana": 7,
+        "2 semanas": 14,
+        "1 mes": 30,
+        "2 meses": 60,
     }[vencimiento]
     fecha_limite = datetime.now() + timedelta(days=dias)
-
     expiraciones = [
         d for d in ticker.options
         if datetime.strptime(d, "%Y-%m-%d") <= fecha_limite
     ]
+
     if not expiraciones:
-        return None, "⚠️ No se encontraron vencimientos disponibles en ese rango."
+        return responder("⚠️ No se encontraron vencimientos en ese rango.")
 
     expiracion = expiraciones[0]
     chain = ticker.option_chain(expiracion)
@@ -160,88 +159,79 @@ def ejecutar_analisis_opciones(user_state):
 
     df["prima"] = (df["bid"] + df["ask"]) / 2
     df["diferencia"] = abs(df["prima"] - prima_obj)
-    df_filtrado = df[
-        (df["prima"] >= prima_obj * 0.9) &
-        (df["prima"] <= prima_obj * 1.1)
-    ]
 
-    if df_filtrado.empty:
-        df_filtrado = df.copy().sort_values("diferencia").head(3)
+    opciones = df.sort_values("diferencia").head(3)
 
-    opciones = []
-    mensaje = "🔍 Opciones más cercanas:\n"
+    if opciones.empty:
+        return responder("⚠️ No se encontraron opciones cercanas.")
 
-    for i, row in df_filtrado.head(3).iterrows():
-        strike = row["strike"]
-        prima = round(row["prima"], 2)
-        fecha = expiracion
-        total = round(prima * contratos * 100, 2)
-        roi = round((prima / precio_actual) * 100, 2) if precio_actual else 0
-        delta = "N/A"
-        opciones.append({
-            "tipo": tipo,
-            "operacion": operacion,
-            "strike": strike,
-            "prima": prima,
-            "expiracion": fecha,
-            "total": total,
-            "roi": roi,
-            "contratos": contratos,
-            "precio_actual": precio_actual
-        })
-        mensaje += (
-            f"[{len(opciones)}] ➡️ {tipo.upper()} | {operacion.upper()}\n"
-            f"🎯 Strike: ${strike} | Prima: ${prima}\n"
-            f"📆 Vence: {fecha}\n"
-            f"💰 Total: ${total}\n"
-            f"📈 ROI: {roi}%\n\n"
+    mensajes = []
+    opciones_data = []
+    for i, row in opciones.iterrows():
+        total = row["prima"] * contratos * 100
+        mensajes.append(
+            f"[{len(opciones_data)}] Strike: ${row['strike']}, Prima: ${round(row['prima'], 2)}, Vence: {expiracion}, Total: ${round(total,2)}"
         )
+        opciones_data.append({
+            "strike": row["strike"],
+            "prima": row["prima"],
+            "expiracion": expiracion,
+            "total": total,
+        })
 
-    return opciones, mensaje
+    estado["opciones_mostradas"] = opciones_data
+    conversacion[sender] = estado
 
-def generar_analisis_detallado(opcion, user_state):
-    # Calcular Delta
-    delta = calcular_delta(
-        tipo=opcion["tipo"],
-        S=opcion["precio_actual"],
-        K=opcion["strike"],
-        T=dias_a_expiracion(opcion["expiracion"]),
-        sigma=0.2  # Volatilidad asumida del 20%
+    mensaje = "🔍 Opciones más cercanas:\n" + "\n".join(mensajes)
+    mensaje += "\n\nResponde con el número de la opción que quieres analizar (ej. 0)."
+    return responder(mensaje)
+
+def analizar_opcion(sender, opcion):
+    """
+    Devuelve un análisis detallado de la opción seleccionada.
+    """
+    estado = conversacion[sender]
+    tipo = estado["tipo"]
+    operacion = estado["operacion"]
+    contratos = estado["contratos"]
+
+    # Parámetros dummy para volatilidad y tasa (puedes ajustar según tu data real)
+    S = yf.Ticker("IBIT").history(period="1d").Close.iloc[-1]
+    K = opcion["strike"]
+    T = max((datetime.strptime(opcion["expiracion"], "%Y-%m-%d") - datetime.now()).days / 365, 1/365)
+    r = 0.02
+    sigma = 0.5
+
+    delta = calcular_delta_call(S, K, T, r, sigma) if tipo == "call" else None
+    prob_asignacion = round(delta * 100, 2) if delta is not None else "N/A"
+    roi = round((opcion["prima"] * 100) / S * 100, 2)
+
+    mensaje = (
+        f"📊 Análisis detallado:\n"
+        f"➡️ {tipo.upper()} | {operacion.upper()}\n"
+        f"🎯 Strike: ${K}\n"
+        f"💰 Prima por contrato: ${round(opcion['prima'], 2)}\n"
+        f"💵 Total: ${round(opcion['total'],2)} por {contratos} contrato(s)\n"
+        f"📆 Vence: {opcion['expiracion']}\n"
+        f"📈 ROI estimado: {roi}%\n"
+        f"⚖️ Delta: {round(delta, 4) if delta else 'N/A'}\n"
+        f"🔗 Probabilidad de asignación: {prob_asignacion}%\n"
+        f"✅ Escribe 'hola' o 'start' para empezar otro análisis."
     )
 
-    detalle = (
-        f"📊 **Análisis Detallado**\n"
-        f"Tipo: {opcion['tipo'].upper()}\n"
-        f"Operación: {opcion['operacion'].upper()}\n"
-        f"Strike: ${opcion['strike']}\n"
-        f"Prima: ${opcion['prima']}\n"
-        f"Total por {opcion['contratos']} contratos: ${opcion['total']}\n"
-        f"Expiración: {opcion['expiracion']}\n"
-        f"Precio IBIT actual: ${round(opcion['precio_actual'], 2)}\n"
-        f"ROI semanal estimado: {opcion['roi']}%\n"
-        f"Delta estimado: {round(delta, 4)}\n"
-    )
+    conversacion[sender] = {}
+    return responder(mensaje)
 
-    return detalle
+def responder(mensaje):
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>{mensaje}</Message>
+</Response>"""
 
-def dias_a_expiracion(fecha_str):
-    fecha_exp = datetime.strptime(fecha_str, "%Y-%m-%d")
-    dias = (fecha_exp - datetime.now()).days
-    return max(dias / 365, 0.001)
-
-def calcular_delta(tipo, S, K, T, sigma, r=0.05):
-    try:
-        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-        if tipo == "call":
-            delta = norm.cdf(d1)
-        else:
-            delta = norm.cdf(d1) - 1
-        return delta
-    except Exception:
-        return 0
-
+# Ejecutar localmente
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
 
 
 
