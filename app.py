@@ -24,7 +24,7 @@ def home():
 def whatsapp_bot():
     incoming_msg = request.form.get('Body', '').strip().lower()
     sender = request.form.get('From', '')
-    
+
     # Reinicio explícito del flujo
     if incoming_msg in ['hola', 'start']:
         conversacion[sender] = {"estado": "esperando_tipo"}
@@ -69,11 +69,12 @@ def whatsapp_bot():
             conversacion[sender]["estado"] = "esperando_vencimiento"
             return responder("¿Cuál es el vencimiento deseado? (1 semana, 2 semanas, 1 mes, 2 meses)")
         except ValueError:
-            return responder("Por favor ingresa un valor numérico para la prima (ej. 0.6).")
+            return responder("Por favor ingresa un número para la prima (ej. 0.6).")
 
     # Paso 5 - Vencimiento
     if estado_actual == "esperando_vencimiento":
-        if incoming_msg not in ["1 semana", "2 semanas", "1 mes", "2 meses"]:
+        opciones_validas = ["1 semana", "2 semanas", "1 mes", "2 meses"]
+        if incoming_msg not in opciones_validas:
             return responder("Indica el vencimiento: 1 semana, 2 semanas, 1 mes o 2 meses.")
         conversacion[sender]["vencimiento"] = incoming_msg
         conversacion[sender]["estado"] = "esperando_contratos"
@@ -84,20 +85,14 @@ def whatsapp_bot():
         try:
             contratos = int(incoming_msg)
             conversacion[sender]["contratos"] = contratos
-
-            # Ejecutar el análisis
             resultado = ejecutar_analisis_opciones(conversacion[sender])
-            
-            # Reiniciar flujo
             conversacion[sender] = {"estado": "esperando_tipo"}
-            
             return responder(resultado + "\n\n✅ Escribe 'hola' para iniciar otro análisis.")
-
         except ValueError:
-            return responder("Por favor ingresa un número entero para los contratos.")
+            return responder("Por favor ingresa un número entero para la cantidad de contratos.")
 
     # Si se pierde el flujo, reiniciar
-    return responder("Algo salió mal. Escribe 'hola' para reiniciar.")
+    return responder("Algo salió mal. Escribe 'hola' para reiniciar el análisis.")
 
 def responder(msg):
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -131,7 +126,6 @@ def ejecutar_analisis_opciones(contexto):
             return "⚠️ No se encontraron vencimientos en ese rango."
 
         expiracion = expiraciones[0]
-
         chain = ticker.option_chain(expiracion)
         df = chain.calls if tipo == "call" else chain.puts
 
@@ -143,10 +137,7 @@ def ejecutar_analisis_opciones(contexto):
             else:
                 df = df.loc[df["strike"] < precio_actual]
 
-        # Calcular prima promedio
         df["prima"] = (df["bid"] + df["ask"]) / 2
-
-        # Buscar dentro del rango ±10%
         rango = prima_obj * 0.1
         df_filtrado = df[
             (df["prima"] >= prima_obj - rango) &
@@ -154,10 +145,8 @@ def ejecutar_analisis_opciones(contexto):
         ]
 
         if df_filtrado.empty:
-            # No hay coincidencias exactas → mostrar las más cercanas
-            df["diferencia"] = (df["prima"] - prima_obj).abs()
+            df["diferencia"] = abs(df["prima"] - prima_obj)
             df_filtrado = df.sort_values("diferencia").head(3)
-
             if df_filtrado.empty:
                 return "❌ No se encontraron opciones cercanas."
 
@@ -177,7 +166,6 @@ def ejecutar_analisis_opciones(contexto):
                 )
             return mensaje.strip()
         else:
-            # Si encuentra coincidencias exactas, tomar la primera
             opcion = df_filtrado.iloc[0]
             strike = opcion["strike"]
             prima = round(opcion["prima"], 2)
@@ -196,9 +184,9 @@ def ejecutar_analisis_opciones(contexto):
     except Exception as e:
         return f"❌ Error durante el análisis: {str(e)}"
 
-# Ejecutar app
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
 
 
 
