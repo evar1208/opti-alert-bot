@@ -129,8 +129,7 @@ def ejecutar_analisis_opciones(datos):
 
         opciones = sorted(opciones, key=lambda x: x["diferencia"])[:3]
 
-        mensaje = "🔍 Opciones más cercanas:
-"
+        mensaje = "🔍 Opciones más cercanas:"
         for opt in opciones:
             total = round(opt["prima"] * contratos * 100, 2)
             roi = round((opt["prima"] * 100) / (opt["strike"] * 100) * 100, 2)
