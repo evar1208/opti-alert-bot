@@ -134,19 +134,14 @@ def ejecutar_analisis_opciones(datos):
             total = round(opt["prima"] * contratos * 100, 2)
             roi = round((opt["prima"] * 100) / (opt["strike"] * 100) * 100, 2)
             mensaje += (
-                f"➡️ {tipo.upper()} | {operacion.upper()}
-"
-                f"🎯 Strike: ${opt['strike']} | Prima: ${opt['prima']}
-"
-                f"📆 Vence: {opt['exp']}
-"
-                f"💰 Total: ${total}
-"
-                f"📈 ROI: {roi}%
-⚖️ Delta: N/A
+    f"➡️ {tipo.upper()} | {operacion.upper()}\n"
+    f"🎯 Strike: ${opt['strike']} | Prima: ${opt['prima']}\n"
+    f"📆 Vence: {opt['exp']}\n"
+    f"💰 Total: ${total}\n"
+    f"📈 ROI: {roi}%\n"
+    f"⚖️ Delta: N/A\n\n"
+)
 
-"
-            )
         return mensaje.strip()
 
     except Exception as e:
