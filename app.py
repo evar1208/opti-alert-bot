@@ -23,20 +23,19 @@ def whatsapp_bot():
     from_number = request.form.get("From", "")
     incoming_msg = request.form.get("Body", "").strip().lower()
 
-    # Reiniciar flujo con hola o start
+    # Reiniciar flujo
     if incoming_msg in ["hola", "start"]:
         user_state[from_number] = {"state": "tipo"}
         return responder("¿Qué tipo de opción quieres analizar? (call o put)")
 
-    # Recuperar estado
     estado = user_state.get(from_number, {"state": "tipo"})
-
     state = estado["state"]
 
     if state == "tipo":
         if incoming_msg in ["call", "put"]:
             estado["tipo"] = incoming_msg
             estado["state"] = "operacion"
+            user_state[from_number] = estado
             return responder("¿Vas a COMPRAR o VENDER esta opción?")
         else:
             return responder("Por favor responde solo 'call' o 'put'.")
@@ -45,6 +44,7 @@ def whatsapp_bot():
         if incoming_msg in ["comprar", "vender"]:
             estado["operacion"] = incoming_msg
             estado["state"] = "otm"
+            user_state[from_number] = estado
             return responder("¿Deseas solo opciones fuera del dinero (OTM)? (s/n)")
         else:
             return responder("Indica 'comprar' o 'vender'.")
@@ -53,25 +53,28 @@ def whatsapp_bot():
         if incoming_msg in ["s", "n"]:
             estado["otm"] = incoming_msg
             estado["state"] = "prima"
+            user_state[from_number] = estado
             return responder("¿Cuál es la prima objetivo? (por ejemplo, 0.6)")
         else:
             return responder("Indica 's' o 'n'.")
 
     elif state == "prima":
         try:
-            # Quitar símbolos y convertir coma a punto
             msg_clean = incoming_msg.replace("$", "").replace(",", ".").strip()
             prima_obj = float(msg_clean)
             estado["prima"] = prima_obj
             estado["state"] = "vencimiento"
+            user_state[from_number] = estado
             return responder("¿Cuál es el vencimiento deseado? (1 semana, 2 semanas, 1 mes, 2 meses)")
         except ValueError:
             return responder("Por favor ingresa un número válido. Ejemplo: 0.55")
 
     elif state == "vencimiento":
-        if incoming_msg in ["1 semana", "2 semanas", "1 mes", "2 meses"]:
+        opciones_venc = ["1 semana", "2 semanas", "1 mes", "2 meses"]
+        if incoming_msg in opciones_venc:
             estado["vencimiento"] = incoming_msg
             estado["state"] = "contratos"
+            user_state[from_number] = estado
             return responder("¿Cuántos contratos deseas analizar?")
         else:
             return responder("Por favor indica uno de estos valores: 1 semana, 2 semanas, 1 mes, 2 meses.")
@@ -80,8 +83,8 @@ def whatsapp_bot():
         if incoming_msg.isdigit():
             contratos = int(incoming_msg)
             estado["contratos"] = contratos
+            user_state[from_number] = estado
 
-            # Ejecutar análisis
             tipo = estado["tipo"]
             operacion = estado["operacion"]
             otm = estado["otm"] == "s"
@@ -109,6 +112,7 @@ def responder(texto):
 def ejecutar_analisis_opciones(tipo, operacion, otm, prima_obj, vencimiento, contratos):
     try:
         ticker = yf.Ticker("IBIT")
+
         dias = {
             "1 semana": 7,
             "2 semanas": 14,
@@ -130,7 +134,7 @@ def ejecutar_analisis_opciones(tipo, operacion, otm, prima_obj, vencimiento, con
         chain = ticker.option_chain(expiracion)
         df = chain.calls if tipo == "call" else chain.puts
 
-        precio_actual = float(ticker.history(period="1d").Close[-1])
+        precio_actual = float(ticker.history(period="1d").Close.iloc[-1])
 
         if otm:
             if tipo == "call":
@@ -183,7 +187,6 @@ def ejecutar_analisis_opciones(tipo, operacion, otm, prima_obj, vencimiento, con
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
 
 
 
